@@ -1,0 +1,46 @@
+wget https://github.com/etcd-io/etcd/releases/download/v3.5.9/etcd-v3.5.9-linux-amd64.tar.gz
+tar -xf etcd-v3.5.9-linux-amd64.tar.gz
+cp -a etcd-v3.5.9-linux-amd64/{etcd,etcdctl} /usr/local/bin/
+pvcreate /dev/sda
+vgcreate vg01 /dev/sda
+lvcreate vg01 -n lv01 -l 100%FREE
+mkfs.ext4 /dev/mapper/vg01-lv01
+cat >> /etc/fstab <<EOF
+/dev/mapper/vg01-lv01 /mnt/lv01 ext4 defaults 0 0
+EOF
+mkdir /mnt/lv01 && systemctl daemon-reload && mount -a && df -Th
+mkdir -p /etc/etcd/conf
+mkdir -p /mnt/lv01/etcd/data/
+ls -lh /mnt/lv01/
+cat > /lib/systemd/system/etcd.service <<EOF
+[Unit]
+Description=Etcd Server
+After=network.target
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=notify
+EnvironmentFile=/etc/etcd/conf/etcd.conf
+ExecStart=/usr/local/bin/etcd --heartbeat-interval=500 --election-timeout=5000
+Restart=on-failure
+LimitNOFILE=100000
+[Install]
+WantedBy=multi-user.target
+EOF
+cat > /etc/etcd/conf/etcd.conf <<EOF
+#[Member]
+ETCD_NAME="dfid-bss-ma01-etcd-p1"
+ETCD_DATA_DIR="/mnt/lv01/etcd/data/default.etcd"
+ETCD_LISTEN_PEER_URLS="http://172.18.14.91:2380"
+ETCD_LISTEN_CLIENT_URLS="http://172.18.14.91:2379,http://127.0.0.1:2379"
+#[Clustering]
+ETCD_INITIAL_ADVERTISE_PEER_URLS="http://172.18.14.91:2380"
+ETCD_ADVERTISE_CLIENT_URLS="http://172.18.14.91:2379"
+ETCD_INITIAL_CLUSTER="dfid-bss-ma01-etcd-p1=http://172.18.14.91:2380,dfid-bss-ma01-etcd-p2=http://172.18.14.92:2380,dfid-bss-ma01-etcd-p3=http://172.18.14.93:2380"
+ETCD_INITIAL_CLUSTER_STATE="new"
+#[other]
+ETCD_MAX_REQUEST_BYTES="15728640"
+ETCD_QUOTA_BACKEND_BYTES="8388608000"
+EOF
+systemctl daemon-reload && systemctl enable etcd; systemctl start etcd
+ETCDCTL_API=3 etcdctl --endpoints="http://172.18.14.91:2379,http://172.18.14.92:2379,http://172.18.14.93:2379" endpoint status --write-out=table
